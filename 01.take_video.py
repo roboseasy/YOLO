@@ -4,7 +4,8 @@ from datetime import datetime
 
 import cv2
 
-OUTPUT_DIR = "/home/khw/workspace/yolo/outputs/videos"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "videos")
 FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
 DEFAULT_FPS = 30.0
 CAPTURE_WIDTH = 640

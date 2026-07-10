@@ -1,0 +1,10 @@
+# 카메라 캡처 / 영상·이미지 처리, GUI 창(cv2.imshow) 사용을 위해 headless가 아닌 일반 패키지 사용
+opencv-python>=4.8.0
+
+# YOLO 학습(03.train.py) 및 추론(04.inference.py)
+# yolo26n.pt 모델을 사용하므로 YOLO26을 지원하는 최신 버전 필요
+ultralytics>=8.3.0
+
+# ultralytics 의존성(torch, numpy 등)은 자동으로 설치됩니다.
+# GPU(CUDA) 학습을 하려면 환경에 맞는 PyTorch를 별도로 설치하세요:
+#   https://pytorch.org/get-started/locally/

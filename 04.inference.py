@@ -1,9 +1,11 @@
+import os
 import time
 
 import cv2
 from ultralytics import YOLO
 
-WEIGHTS = "/home/khw/workspace/yolo/outputs/runs/green_cube_v1/weights/best.pt"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+WEIGHTS = os.path.join(BASE_DIR, "outputs", "runs", "green_cube_v1", "weights", "best.pt")
 CAMERA_INDEX = 4
 CAPTURE_WIDTH = 640
 CAPTURE_HEIGHT = 480

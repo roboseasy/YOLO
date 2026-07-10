@@ -1,8 +1,11 @@
+import os
+
 from ultralytics import YOLO
 
-DATA_YAML = "/home/khw/workspace/yolo/dataset/data.yaml"
-PROJECT_DIR = "/home/khw/workspace/yolo/outputs/runs"
-RUN_NAME = "green_cube_v1"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_YAML = os.path.join(BASE_DIR, "dataset", "data.yaml")
+PROJECT_DIR = os.path.join(BASE_DIR, "outputs", "runs")
+RUN_NAME = "cube"
 
 PRETRAINED = "yolo26n.pt"
 EPOCHS = 100
