@@ -1,3 +1,4 @@
+import argparse
 import os
 import time
 
@@ -12,29 +13,104 @@ from frame_source import (
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WEIGHTS = os.path.join(BASE_DIR, "outputs", "runs", "cube", "weights", "best.pt")
+
+# 아래는 전부 기본값이고, 명령줄 옵션으로 덮어쓴다. (--help 참고)
+#   python 04.inference.py --remote=192.168.0.201
+#   python 04.inference.py --source local --weights outputs/runs/cube2/weights/best.pt
+DEFAULT_WEIGHTS = os.path.join(BASE_DIR, "outputs", "runs", "cube", "weights", "best.pt")
 
 # "lekiwi" : 라즈베리파이의 lekiwi_host 가 ZMQ 로 뿌리는 영상 (랜선 직결)
 # "local"  : 노트북에 꽂은 USB 웹캠
-SOURCE = "lekiwi"
+DEFAULT_SOURCE = "lekiwi"
 
-# --- SOURCE = "lekiwi" ---
-REMOTE_IP = "10.42.0.61"          # 랜선 직결. 노트북은 10.42.0.1
-CAMERA_NAME = "front"             # host 가 발행하는 이름. 실행 시 다시 고를 수 있다.
-PORT_OBSERVATIONS = 5556
-HOST_COLOR_MODE = "rgb"           # host 가 보내는 채널 순서 (rgb | bgr)
+# --- source = "lekiwi" ---
+DEFAULT_REMOTE_IP = "192.168.0.201"   # 랜선 직결. 노트북은 10.42.0.1
+DEFAULT_CAMERA_NAME = "front"         # host 가 발행하는 이름. 실행 시 다시 고를 수 있다.
+DEFAULT_PORT_OBSERVATIONS = 5556
+DEFAULT_HOST_COLOR_MODE = "rgb"       # host 가 보내는 채널 순서 (rgb | bgr)
 
-# --- SOURCE = "local" ---
-CAPTURE_WIDTH = 640
-CAPTURE_HEIGHT = 480
+# --- source = "local" ---
+DEFAULT_CAPTURE_WIDTH = 640
+DEFAULT_CAPTURE_HEIGHT = 480
 MAX_PROBE_INDEX = 10
 
-DISPLAY_WIDTH = 640
-DISPLAY_HEIGHT = 480
+DEFAULT_DISPLAY_WIDTH = 640
+DEFAULT_DISPLAY_HEIGHT = 480
 
-CONF_THRES = 0.25
-IOU_THRES = 0.45
-DEVICE = 0
+DEFAULT_CONF_THRES = 0.25
+DEFAULT_IOU_THRES = 0.45
+DEFAULT_DEVICE = "0"
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="학습한 YOLO 가중치로 실시간 추론한다.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--weights", default=DEFAULT_WEIGHTS, metavar="PATH",
+        help="사용할 .pt 가중치 경로",
+    )
+    parser.add_argument(
+        "--source", choices=("lekiwi", "local"), default=DEFAULT_SOURCE,
+        help="영상 소스. lekiwi=라즈베리파이 ZMQ 스트림, local=USB 웹캠",
+    )
+    parser.add_argument(
+        "--remote", "--remote-ip", dest="remote_ip", default=DEFAULT_REMOTE_IP,
+        metavar="IP", help="lekiwi host 의 IP",
+    )
+    parser.add_argument(
+        "--port", type=int, default=DEFAULT_PORT_OBSERVATIONS,
+        help="lekiwi host 의 관측 스트림 포트",
+    )
+    parser.add_argument(
+        "--camera", default=DEFAULT_CAMERA_NAME, metavar="NAME",
+        help="lekiwi 카메라 이름 (실행 중에 다시 고를 수 있다)",
+    )
+    parser.add_argument(
+        "--color-mode", choices=("rgb", "bgr"), default=DEFAULT_HOST_COLOR_MODE,
+        help="host 가 보내는 채널 순서. 색이 뒤집혀 보이면 바꾼다",
+    )
+    parser.add_argument(
+        "--camera-index", type=int, default=None, metavar="N",
+        help="local 웹캠 장치 index (지정하지 않으면 실행 중에 고른다)",
+    )
+    parser.add_argument(
+        "--capture-size", default=f"{DEFAULT_CAPTURE_WIDTH}x{DEFAULT_CAPTURE_HEIGHT}",
+        metavar="WxH", help="local 웹캠 캡처 해상도",
+    )
+    parser.add_argument(
+        "--display-size", default=f"{DEFAULT_DISPLAY_WIDTH}x{DEFAULT_DISPLAY_HEIGHT}",
+        metavar="WxH", help="미리보기 창 크기",
+    )
+    parser.add_argument(
+        "--conf", type=float, default=DEFAULT_CONF_THRES, help="confidence 임계값",
+    )
+    parser.add_argument(
+        "--iou", type=float, default=DEFAULT_IOU_THRES, help="NMS IoU 임계값",
+    )
+    parser.add_argument(
+        "--device", default=DEFAULT_DEVICE, help="추론 장치 (0, 0,1, cpu ...)",
+    )
+    args = parser.parse_args(argv)
+    args.capture_size = parse_size(parser, "--capture-size", args.capture_size)
+    args.display_size = parse_size(parser, "--display-size", args.display_size)
+    args.device = normalize_device(args.device)
+    return args
+
+
+def parse_size(parser, option, raw):
+    """'640x480' 을 (640, 480) 으로."""
+    parts = str(raw).lower().split("x")
+    if len(parts) != 2 or not all(p.strip().isdigit() for p in parts):
+        parser.error(f"{option} 는 'WxH' 형식이어야 합니다 (예: 640x480): {raw!r}")
+    return int(parts[0]), int(parts[1])
+
+
+def normalize_device(raw):
+    """ultralytics 는 GPU 를 문자열 '0' 보다 정수 0 으로 받는 쪽이 안전하다."""
+    text = str(raw).strip()
+    return int(text) if text.isdigit() else text
 
 
 def list_available_cameras(max_index: int = MAX_PROBE_INDEX):
@@ -94,32 +170,38 @@ def prompt_camera_name(names, default):
         print(f"  -> '{raw}' 는 없는 카메라입니다. {names} 중에서 선택하세요.")
 
 
-def open_source():
-    if SOURCE == "local":
+def open_source(args):
+    if args.source == "local":
+        width, height = args.capture_size
+        if args.camera_index is not None:
+            return LocalCamera(args.camera_index, width, height)
         available = list_available_cameras()
         camera_index = prompt_camera_index(available)
-        return LocalCamera(camera_index, CAPTURE_WIDTH, CAPTURE_HEIGHT)
+        return LocalCamera(camera_index, width, height)
 
-    if SOURCE == "lekiwi":
+    if args.source == "lekiwi":
         cap = LeKiwiStream(
-            remote_ip=REMOTE_IP,
+            remote_ip=args.remote_ip,
             cam_name=ANY_CAMERA,
-            port=PORT_OBSERVATIONS,
-            host_color_mode=HOST_COLOR_MODE,
+            port=args.port,
+            host_color_mode=args.color_mode,
         )
-        cap.use_camera(prompt_camera_name(cap.camera_names, CAMERA_NAME))
+        cap.use_camera(prompt_camera_name(cap.camera_names, args.camera))
         return cap
 
-    raise RuntimeError(f"알 수 없는 SOURCE '{SOURCE}' — 'local' 또는 'lekiwi'.")
+    raise RuntimeError(f"알 수 없는 source '{args.source}' — 'local' 또는 'lekiwi'.")
 
 
-def main():
-    print(f"[모델 로드] {WEIGHTS}")
-    model = YOLO(WEIGHTS)
+def main(argv=None):
+    args = parse_args(argv)
+    display_width, display_height = args.display_size
+
+    print(f"[모델 로드] {args.weights}")
+    model = YOLO(args.weights)
     class_names = model.names
 
     try:
-        cap = open_source()
+        cap = open_source(args)
     except FrameSourceError as e:
         raise SystemExit(f"[오류] {e}")
 
@@ -127,7 +209,7 @@ def main():
 
     window_name = "YOLO Inference (q/ESC to quit)"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+    cv2.resizeWindow(window_name, display_width, display_height)
 
     print("[안내] q 또는 ESC: 종료")
 
@@ -142,9 +224,9 @@ def main():
 
             results = model.predict(
                 frame,
-                conf=CONF_THRES,
-                iou=IOU_THRES,
-                device=DEVICE,
+                conf=args.conf,
+                iou=args.iou,
+                device=args.device,
                 verbose=False,
             )
             annotated = results[0].plot()
@@ -165,8 +247,8 @@ def main():
                 2,
             )
 
-            if (annotated.shape[1], annotated.shape[0]) != (DISPLAY_WIDTH, DISPLAY_HEIGHT):
-                annotated = cv2.resize(annotated, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
+            if (annotated.shape[1], annotated.shape[0]) != (display_width, display_height):
+                annotated = cv2.resize(annotated, (display_width, display_height))
 
             cv2.imshow(window_name, annotated)
             key = cv2.waitKey(1) & 0xFF

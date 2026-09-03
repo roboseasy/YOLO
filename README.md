@@ -9,9 +9,13 @@ yolo/
 ├── frame_source.py           # 프레임 출처(로컬 웹캠 / LeKiwi ZMQ 스트림)
 ├── 01.take_video.py          # mp4 동영상 촬영
 ├── 02.splite_video2pic.py    # 동영상을 프레임 단위 이미지로 분할
+├── 03.train.py               # YOLO 학습 + 검증
+├── 04.inference.py           # 학습한 가중치로 실시간 추론
+├── dataset/                  # 라벨링된 학습 데이터 (data.yaml)
 ├── outputs/                  # 생성물 저장소 (git 추적 제외)
 │   ├── videos/               # 촬영된 mp4 파일
-│   └── pictures/             # 분할된 프레임 이미지
+│   ├── pictures/             # 분할된 프레임 이미지
+│   └── runs/                 # 학습 결과 (가중치, 그래프)
 └── README.md
 ```
 
@@ -20,20 +24,37 @@ yolo/
 ### 1. 데이터 수집 — 동영상 촬영
 [01.take_video.py](01.take_video.py)
 
-영상 출처는 파일 위쪽 `SOURCE` 로 고릅니다. 기본값은 `"lekiwi"` 입니다.
+영상 출처는 `--source` 로 고릅니다. 기본값은 `lekiwi` 입니다.
 
-| `SOURCE` | 영상 출처 |
+| `--source` | 영상 출처 |
 | --- | --- |
-| `"lekiwi"` | 라즈베리파이의 `lekiwi_host` 가 ZMQ 로 뿌리는 스트림 (랜선 직결) |
-| `"local"` | 노트북에 꽂은 USB 웹캠 |
+| `lekiwi` | 라즈베리파이의 `lekiwi_host` 가 ZMQ 로 뿌리는 스트림 (랜선 직결) |
+| `local` | 노트북에 꽂은 USB 웹캠 |
 
 - 실행 시 사용 가능한 카메라(로컬은 index, LeKiwi 는 `front` / `wrist`)를 출력하고 선택
 - **Space**: 녹화 시작/중지 토글, **q / ESC**: 종료
 - 저장 경로: `outputs/videos/YYYYMMDD_HHMMSS.mp4`
 
 ```bash
-python 01.take_video.py
+python 01.take_video.py                              # 기본값 그대로
+python 01.take_video.py --remote=192.168.0.201       # LeKiwi host IP 지정
+python 01.take_video.py --source local               # 노트북 USB 웹캠
+python 01.take_video.py --help                       # 전체 옵션
 ```
+
+주요 옵션 (`--help` 로 전부 확인):
+
+| 옵션 | 설명 | 기본값 |
+| --- | --- | --- |
+| `--source` | `lekiwi` / `local` | `lekiwi` |
+| `--remote` | LeKiwi host IP | `192.168.0.201` |
+| `--port` | 관측 스트림 포트 | `5556` |
+| `--camera` | LeKiwi 카메라 이름 | `front` |
+| `--color-mode` | host 채널 순서 (`rgb` / `bgr`) | `rgb` |
+| `--camera-index` | 로컬 웹캠 index (생략하면 실행 중 선택) | 없음 |
+| `--capture-size` / `--display-size` | `WxH` | `640x480` |
+| `--output-dir` | mp4 저장 폴더 | `outputs/videos` |
+| `--fps` | 저장 FPS (생략하면 실측) | 실측 |
 
 #### LeKiwi 카메라로 찍기
 
@@ -59,25 +80,28 @@ ssh roboseasy@10.42.0.61
 
 ```bash
 ping -c1 10.42.0.61             # 먼저 연결 확인
-python 01.take_video.py
+python 01.take_video.py --remote=10.42.0.61
 ```
 
 - `lerobot` 를 `yolo` 환경에 깔 필요는 **없습니다.** host 가 보내는 메시지는 그냥 JSON 이라
   `pyzmq` 만 있으면 받습니다.
 - 한 host 에는 **클라이언트를 하나만** 붙이세요. teleop·record 가 같이 붙어 있으면 프레임을
   나눠 가져서 뚝뚝 끊깁니다.
-- 색이 이상하면(보라가 분홍, 노랑이 파랑) `HOST_COLOR_MODE` 를 `bgr` 로 바꿉니다. lerobot 의
+- 색이 이상하면(보라가 분홍, 노랑이 파랑) `--color-mode bgr` 로 실행합니다. lerobot 의
   `OpenCVCameraConfig` 기본값이 RGB 라 host 가 채널을 뒤집어 보내는 것을 되돌리는 값입니다.
 - host 는 FPS 를 알려주지 않아서, 녹화 전에 2초간 실제 프레임 속도를 재서 그 값으로 저장합니다.
 
 ### 2. 데이터 전처리 — 프레임 분할
 [02.splite_video2pic.py](02.splite_video2pic.py)
 
-- `INPUT_VIDEO` 변수로 지정한 mp4 파일을 모든 프레임으로 분할
+- `--video` 로 지정한 mp4 를 프레임 단위로 분할 (생략하면 `outputs/videos` 목록에서 고름)
 - 저장 경로: `outputs/pictures/<영상이름>/<영상이름>_00000001.png` …
+- `--stride N` 으로 N 프레임마다 한 장씩만 저장 (라벨링할 장수 줄이기)
 
 ```bash
-python 02.splite_video2pic.py
+python 02.splite_video2pic.py                                       # 목록에서 고르기
+python 02.splite_video2pic.py --video outputs/videos/20260903_210000.mp4
+python 02.splite_video2pic.py --stride 5                            # 5프레임에 1장
 ```
 
 ### 3. 라벨링 — Roboflow Auto-Label
@@ -90,8 +114,36 @@ python 02.splite_video2pic.py
 ### 4. 모델 학습 — 500장 데이터셋으로 시범 학습
 우선 자동 라벨링된 500장만으로 Ultralytics YOLO 학습을 진행해 파이프라인이 정상 동작하는지, 성능이 어느 정도 나오는지 확인합니다. 결과를 보고 추가 데이터 라벨링 여부를 결정합니다.
 
-### 5. 추론 (예정)
-학습된 가중치로 이미지·동영상·실시간 웹캠 추론.
+`dataset` 이름의 폴더를 넣습니다.
+
+[03.train.py](03.train.py)
+
+```bash
+python 03.train.py                                   # 기본값 그대로
+python 03.train.py --epochs 200 --batch 8 --name cube2
+python 03.train.py --device cpu                      # GPU 없이
+python 03.train.py --help                            # 전체 옵션
+```
+
+- 결과 저장 경로: `outputs/runs/<--name>/` (가중치는 `weights/best.pt`)
+- `--data`, `--pretrained`, `--imgsz`, `--patience` 도 옵션으로 바꿀 수 있습니다.
+
+### 5. 추론
+[04.inference.py](04.inference.py)
+
+학습된 가중치로 실시간 스트림을 추론합니다. **q / ESC**: 종료.
+
+```bash
+python 04.inference.py                               # 기본 가중치 + lekiwi
+python 04.inference.py --remote=192.168.0.201        # LeKiwi host IP 지정
+python 04.inference.py --source local --camera-index 0
+python 04.inference.py --weights outputs/runs/cube2/weights/best.pt --conf 0.4
+python 04.inference.py --help                        # 전체 옵션
+```
+
+- 영상 소스 관련 옵션(`--source`, `--remote`, `--port`, `--camera`, `--color-mode`,
+  `--camera-index`, `--capture-size`, `--display-size`)은 `01.take_video.py` 와 동일합니다.
+- 추론 옵션: `--weights`, `--conf`, `--iou`, `--device`
 
 ## 요구사항
 

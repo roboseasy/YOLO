@@ -1,3 +1,4 @@
+import argparse
 import os
 import time
 from datetime import datetime
@@ -12,28 +13,91 @@ from frame_source import (
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "videos")
 FOURCC = cv2.VideoWriter_fourcc(*"mp4v")
-DEFAULT_FPS = 30.0
+FALLBACK_FPS = 30.0
+
+# 아래는 전부 기본값이고, 명령줄 옵션으로 덮어쓴다. (--help 참고)
+#   python 01.take_video.py --remote=192.168.0.201
+#   python 01.take_video.py --source local
+DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "outputs", "videos")
 
 # "lekiwi" : 라즈베리파이의 lekiwi_host 가 ZMQ 로 뿌리는 영상 (랜선 직결)
 # "local"  : 노트북에 꽂은 USB 웹캠
-SOURCE = "lekiwi"
+DEFAULT_SOURCE = "lekiwi"
 
-# --- SOURCE = "lekiwi" ---
-REMOTE_IP = "10.42.0.61"          # 랜선 직결. 노트북은 10.42.0.1
-CAMERA_NAME = "front"             # host 가 발행하는 이름. 실행 시 다시 고를 수 있다.
-PORT_OBSERVATIONS = 5556
-HOST_COLOR_MODE = "rgb"           # host 가 보내는 채널 순서 (rgb | bgr)
+# --- source = "lekiwi" ---
+DEFAULT_REMOTE_IP = "192.168.0.201"   # 랜선 직결. 노트북은 10.42.0.1
+DEFAULT_CAMERA_NAME = "front"         # host 가 발행하는 이름. 실행 시 다시 고를 수 있다.
+DEFAULT_PORT_OBSERVATIONS = 5556
+DEFAULT_HOST_COLOR_MODE = "rgb"       # host 가 보내는 채널 순서 (rgb | bgr)
 
-# --- SOURCE = "local" ---
-CAPTURE_WIDTH = 640
-CAPTURE_HEIGHT = 480
+# --- source = "local" ---
+DEFAULT_CAPTURE_WIDTH = 640
+DEFAULT_CAPTURE_HEIGHT = 480
 MAX_PROBE_INDEX = 10
 
-DISPLAY_WIDTH = 640
-DISPLAY_HEIGHT = 480
+DEFAULT_DISPLAY_WIDTH = 640
+DEFAULT_DISPLAY_HEIGHT = 480
 FPS_PROBE_SECONDS = 2.0
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="카메라 영상을 mp4 로 녹화한다. (스페이스바로 시작/중지)",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    parser.add_argument(
+        "--source", choices=("lekiwi", "local"), default=DEFAULT_SOURCE,
+        help="영상 소스. lekiwi=라즈베리파이 ZMQ 스트림, local=USB 웹캠",
+    )
+    parser.add_argument(
+        "--remote", "--remote-ip", dest="remote_ip", default=DEFAULT_REMOTE_IP,
+        metavar="IP", help="lekiwi host 의 IP",
+    )
+    parser.add_argument(
+        "--port", type=int, default=DEFAULT_PORT_OBSERVATIONS,
+        help="lekiwi host 의 관측 스트림 포트",
+    )
+    parser.add_argument(
+        "--camera", default=DEFAULT_CAMERA_NAME, metavar="NAME",
+        help="lekiwi 카메라 이름 (실행 중에 다시 고를 수 있다)",
+    )
+    parser.add_argument(
+        "--color-mode", choices=("rgb", "bgr"), default=DEFAULT_HOST_COLOR_MODE,
+        help="host 가 보내는 채널 순서. 색이 뒤집혀 보이면 바꾼다",
+    )
+    parser.add_argument(
+        "--camera-index", type=int, default=None, metavar="N",
+        help="local 웹캠 장치 index (지정하지 않으면 실행 중에 고른다)",
+    )
+    parser.add_argument(
+        "--capture-size", default=f"{DEFAULT_CAPTURE_WIDTH}x{DEFAULT_CAPTURE_HEIGHT}",
+        metavar="WxH", help="local 웹캠 캡처 해상도",
+    )
+    parser.add_argument(
+        "--display-size", default=f"{DEFAULT_DISPLAY_WIDTH}x{DEFAULT_DISPLAY_HEIGHT}",
+        metavar="WxH", help="미리보기 창 크기",
+    )
+    parser.add_argument(
+        "--output-dir", default=DEFAULT_OUTPUT_DIR, metavar="DIR",
+        help="mp4 를 저장할 폴더",
+    )
+    parser.add_argument(
+        "--fps", type=float, default=None,
+        help="저장 FPS. 지정하지 않으면 실제 프레임 속도를 재서 쓴다",
+    )
+    args = parser.parse_args(argv)
+    args.capture_size = parse_size(parser, "--capture-size", args.capture_size)
+    args.display_size = parse_size(parser, "--display-size", args.display_size)
+    return args
+
+
+def parse_size(parser, option, raw):
+    """'640x480' 을 (640, 480) 으로."""
+    parts = str(raw).lower().split("x")
+    if len(parts) != 2 or not all(p.strip().isdigit() for p in parts):
+        parser.error(f"{option} 는 'WxH' 형식이어야 합니다 (예: 640x480): {raw!r}")
+    return int(parts[0]), int(parts[1])
 
 
 def list_available_cameras(max_index: int = MAX_PROBE_INDEX):
@@ -93,23 +157,26 @@ def prompt_camera_name(names, default):
         print(f"  -> '{raw}' 는 없는 카메라입니다. {names} 중에서 선택하세요.")
 
 
-def open_source():
-    if SOURCE == "local":
+def open_source(args):
+    if args.source == "local":
+        width, height = args.capture_size
+        if args.camera_index is not None:
+            return LocalCamera(args.camera_index, width, height)
         available = list_available_cameras()
         camera_index = prompt_camera_index(available)
-        return LocalCamera(camera_index, CAPTURE_WIDTH, CAPTURE_HEIGHT)
+        return LocalCamera(camera_index, width, height)
 
-    if SOURCE == "lekiwi":
+    if args.source == "lekiwi":
         cap = LeKiwiStream(
-            remote_ip=REMOTE_IP,
+            remote_ip=args.remote_ip,
             cam_name=ANY_CAMERA,
-            port=PORT_OBSERVATIONS,
-            host_color_mode=HOST_COLOR_MODE,
+            port=args.port,
+            host_color_mode=args.color_mode,
         )
-        cap.use_camera(prompt_camera_name(cap.camera_names, CAMERA_NAME))
+        cap.use_camera(prompt_camera_name(cap.camera_names, args.camera))
         return cap
 
-    raise RuntimeError(f"알 수 없는 SOURCE '{SOURCE}' — 'local' 또는 'lekiwi'.")
+    raise RuntimeError(f"알 수 없는 source '{args.source}' — 'local' 또는 'lekiwi'.")
 
 
 def measure_fps(cap, seconds=FPS_PROBE_SECONDS):
@@ -127,15 +194,17 @@ def measure_fps(cap, seconds=FPS_PROBE_SECONDS):
         frames += 1
     elapsed = time.time() - start
     if frames < 2 or elapsed <= 0:
-        return DEFAULT_FPS
+        return FALLBACK_FPS
     return frames / elapsed
 
 
-def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
+def main(argv=None):
+    args = parse_args(argv)
+    display_width, display_height = args.display_size
+    os.makedirs(args.output_dir, exist_ok=True)
 
     try:
-        cap = open_source()
+        cap = open_source(args)
     except FrameSourceError as e:
         raise SystemExit(f"[오류] {e}")
 
@@ -147,7 +216,7 @@ def main():
         raise SystemExit("[오류] 연결은 됐지만 프레임이 오지 않습니다.")
     height, width = frame.shape[:2]
 
-    fps = cap.fps or measure_fps(cap)
+    fps = args.fps or cap.fps or measure_fps(cap)
     print(f"[정보] {width}x{height} @ {fps:.1f} FPS 로 저장합니다.")
 
     print("[안내] 스페이스바: 녹화 시작/중지, q 또는 ESC: 종료")
@@ -159,7 +228,7 @@ def main():
 
     window_name = "Recorder (Space=Start/Stop, q/ESC=Quit)"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+    cv2.resizeWindow(window_name, display_width, display_height)
 
     try:
         while True:
@@ -168,8 +237,8 @@ def main():
                 print("[경고] 프레임을 읽지 못했습니다.")
                 break
 
-            if (frame.shape[1], frame.shape[0]) != (DISPLAY_WIDTH, DISPLAY_HEIGHT):
-                display = cv2.resize(frame, (DISPLAY_WIDTH, DISPLAY_HEIGHT))
+            if (frame.shape[1], frame.shape[0]) != (display_width, display_height):
+                display = cv2.resize(frame, (display_width, display_height))
             else:
                 display = frame.copy()
             if recording:
@@ -203,7 +272,7 @@ def main():
             if key == ord(" "):
                 if not recording:
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    output_path = os.path.join(OUTPUT_DIR, f"{timestamp}.mp4")
+                    output_path = os.path.join(args.output_dir, f"{timestamp}.mp4")
                     writer = cv2.VideoWriter(output_path, FOURCC, fps, (width, height))
                     if not writer.isOpened():
                         print(f"[오류] VideoWriter를 열 수 없습니다: {output_path}")
