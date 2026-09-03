@@ -143,15 +143,66 @@ def resolve_repo_id(parser, repo, owner):
 
 
 def resolve_token(args):
+    """(토큰, 어디서 온 토큰인지) 를 돌려준다. 권한 오류 메시지에 출처를 쓴다."""
     if args.token:
-        return args.token
+        return args.token, "--token 으로 받음"
     for name in TOKEN_ENV_VARS:
         token = os.environ.get(name)
         if token:
             print(f"[토큰] 환경변수 {name} 사용")
-            return token
+            return token, f"환경변수 {name}"
     print("[토큰] 환경변수가 없어 huggingface-cli 로그인 정보를 씁니다.")
-    return None      # huggingface_hub 가 캐시된 로그인을 찾는다
+    # None 을 주면 huggingface_hub 가 캐시된 로그인을 찾는다
+    return None, "huggingface-cli 로그인 캐시"
+
+
+def token_write_targets(who):
+    """토큰이 쓸 수 있는 계정/조직 이름들. 판단할 수 없으면 None."""
+    auth = (who.get("auth") or {}).get("accessToken") or {}
+    role = auth.get("role")
+    if role in ("write", "admin"):
+        # 옛 방식(classic) write 토큰: 본인 계정과 소속 조직 전부에 쓸 수 있다
+        return {who.get("name")} | {o.get("name") for o in who.get("orgs") or []}
+    if role == "read":
+        return set()
+    if role != "fineGrained":
+        return None                      # 모르는 형태면 막지 않고 그냥 시도한다
+
+    targets = set()
+    for scope in (auth.get("fineGrained") or {}).get("scoped") or []:
+        permissions = scope.get("permissions") or []
+        if "repo.write" not in permissions:
+            continue
+        name = (scope.get("entity") or {}).get("name")
+        if name:
+            targets.add(name)
+    return targets
+
+
+def verify_write_access(who, repo_id, token_hint):
+    """업로드 도중 403 으로 죽지 않도록 미리 권한을 확인한다.
+
+    whoami() 는 토큰 신원(읽기)만 확인하므로 통과해도 쓰기가 막힐 수 있다."""
+    owner = repo_id.split("/")[0]
+    targets = token_write_targets(who)
+    if targets is None or owner in targets:
+        return
+
+    auth = (who.get("auth") or {}).get("accessToken") or {}
+    writable = ", ".join(sorted(t for t in targets if t)) or "없음"
+    raise SystemExit(
+        f"[오류] 이 토큰은 '{owner}' 에 쓸 권한이 없습니다.\n"
+        f"  토큰: {auth.get('displayName') or '?'} (종류: {auth.get('role') or '?'}, {token_hint})\n"
+        f"  쓸 수 있는 곳: {writable}\n"
+        "\n  해결 방법 (하나만 고르면 됩니다)\n"
+        "  1) write 권한 토큰을 새로 만들어 환경변수로 넘기기\n"
+        "     https://huggingface.co/settings/tokens 에서 'Write' 토큰 생성 후\n"
+        "       export HF_TOKEN=hf_xxxxxxxx\n"
+        f"  2) 지금 쓰는 fine-grained 토큰에 '{owner}' 조직 권한을 추가\n"
+        f"     토큰 설정 > Repositories 에서 {owner} 를 넣고 'Write access to contents' 체크\n"
+        f"  3) 개인 계정에 올리기\n"
+        f"       python 05.upload_hf.py --owner {who.get('name')}"
+    )
 
 
 def read_metrics(run_dir):
@@ -423,7 +474,7 @@ def main(argv=None):
 
     total_mb = sum(os.path.getsize(src) for src, _ in files) / 1e6
     print(f"[학습 결과] {run_dir}")
-    print(f"[레포] {args.repo_id}  ({'private' if args.private else 'public'})")
+    print(f"[레포] {args.repo_id}")
     print(f"[올릴 파일] {len(files)}개, {total_mb:.1f} MB")
     for _, name in files:
         print(f"  - {name}")
@@ -431,6 +482,7 @@ def main(argv=None):
         print("  - README.md (모델 카드)")
 
     if args.dry_run:
+        print(f"[공개 범위] 새로 만들 경우 {'private' if args.private else 'public'}")
         print("\n[dry-run] 업로드하지 않았습니다.")
         if card_text is not None:
             print("\n--- README.md ---")
@@ -444,18 +496,28 @@ def main(argv=None):
             "[오류] huggingface_hub 가 필요합니다.\n  pip install huggingface_hub"
         ) from e
 
-    api = HfApi(token=resolve_token(args))
+    token, token_hint = resolve_token(args)
+    api = HfApi(token=token)
     try:
         who = api.whoami()
     except Exception as e:
         raise SystemExit(
-            f"[오류] 토큰 확인 실패: {e}\n"
+            f"[오류] 토큰 확인 실패 ({token_hint}): {e}\n"
             "  write 권한이 있는 토큰인지 확인하세요. https://huggingface.co/settings/tokens"
         )
     print(f"[계정] {who.get('name')}")
+    verify_write_access(who, args.repo_id, token_hint)
 
     api.create_repo(repo_id=args.repo_id, repo_type="model",
                     private=args.private, exist_ok=True)
+
+    # 이미 있는 레포의 공개 범위는 create_repo 가 바꾸지 않는다. 실제 상태를 알려준다.
+    actual_private = api.repo_info(args.repo_id, repo_type="model").private
+    print(f"[공개 범위] {'private' if actual_private else 'public'}")
+    if actual_private != args.private:
+        want = "private" if args.private else "public"
+        print(f"  -> 이미 있는 레포라 {want} 요청은 무시했습니다. "
+              "바꾸려면 Hub 의 Settings 에서 변경하세요.")
 
     message = args.message or f"Upload YOLO weights from run '{os.path.basename(run_dir)}'"
     with tempfile.TemporaryDirectory() as stage_dir:
