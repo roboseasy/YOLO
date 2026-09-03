@@ -12,3 +12,4 @@ ultralytics>=8.3.0
 # ultralytics 의존성(torch, numpy 등)은 자동으로 설치됩니다.
 # GPU(CUDA) 학습을 하려면 환경에 맞는 PyTorch를 별도로 설치하세요:
 #   https://pytorch.org/get-started/locally/
+huggingface_hub

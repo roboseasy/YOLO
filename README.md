@@ -11,6 +11,7 @@ yolo/
 ├── 02.splite_video2pic.py    # 동영상을 프레임 단위 이미지로 분할
 ├── 03.train.py               # YOLO 학습 + 검증
 ├── 04.inference.py           # 학습한 가중치로 실시간 추론
+├── 05.upload_hf.py           # 학습한 가중치를 Hugging Face Hub 에 업로드
 ├── dataset/                  # 라벨링된 학습 데이터 (data.yaml)
 ├── outputs/                  # 생성물 저장소 (git 추적 제외)
 │   ├── videos/               # 촬영된 mp4 파일
@@ -145,11 +146,62 @@ python 04.inference.py --help                        # 전체 옵션
   `--camera-index`, `--capture-size`, `--display-size`)은 `01.take_video.py` 와 동일합니다.
 - 추론 옵션: `--weights`, `--conf`, `--iou`, `--device`
 
+### 6. 배포 — Hugging Face Hub 업로드
+[05.upload_hf.py](05.upload_hf.py)
+
+학습한 가중치를 모델 카드(성능 표·사용법·학습 설정)와 함께 Hub 에 올립니다.
+모델 카드는 `results.csv` 와 `args.yaml` 을 읽어 자동으로 만듭니다.
+
+**토큰은 코드에 적지 말고 환경변수로 넘기세요.** [토큰 발급](https://huggingface.co/settings/tokens)
+시 write 권한이 필요합니다.
+
+```bash
+pip install huggingface_hub
+export HF_TOKEN=hf_xxxxxxxx
+
+python 05.upload_hf.py --dry-run                     # 올릴 파일 + 모델 카드 미리보기
+python 05.upload_hf.py --run cube --public           # 실제 업로드
+python 05.upload_hf.py --repo my_id/my_model --include all
+python 05.upload_hf.py --help                        # 전체 옵션
+```
+
+`huggingface-cli login` 을 한 번 해 뒀다면 `--token` 도 환경변수도 필요 없습니다.
+
+| 옵션 | 설명 | 기본값 |
+| --- | --- | --- |
+| `--repo` | 레포 이름 (`owner/name` 도 가능) | `red_cube_yolo` |
+| `--owner` | 조직 또는 개인 계정 | `roboseasylabs` |
+| `--token` | HF 액세스 토큰 | 환경변수 / CLI 로그인 |
+| `--public` / `--private` | 공개 범위 | `--private` |
+| `--run` | 올릴 학습 실행 (생략하면 mAP 와 함께 목록 표시) | 목록에서 선택 |
+| `--include` | `weights` `metrics` `plots` `samples` `all` | `weights` |
+| `--no-card` | 모델 카드를 만들지 않음 (Hub 에서 고친 카드 보존) | 카드 생성 |
+| `--dry-run` | 업로드 없이 미리보기 | 꺼짐 |
+
+업로드된 모델은 이렇게 씁니다.
+
+```python
+from huggingface_hub import hf_hub_download
+from ultralytics import YOLO
+
+model = YOLO(hf_hub_download("roboseasylabs/red_cube_yolo", "best.pt"))
+results = model.predict("image.jpg", conf=0.25)
+```
+
+**공개된 모델**: [roboseasylabs/red_cube_yolo](https://huggingface.co/roboseasylabs/red_cube_yolo)
+(`yolo26n`, 100 epochs, mAP50-95 **0.9892**)
+
 ## 요구사항
 
 - Python 3.8+
 - OpenCV (`pip install opencv-python`)
-- (이후 단계) Ultralytics, PyTorch 등
+- Ultralytics, PyTorch (학습·추론)
+- pyzmq (LeKiwi 스트림 수신)
+- huggingface_hub (Hub 업로드)
+
+```bash
+pip install -r requirements.txt
+```
 
 ## 비고
 
