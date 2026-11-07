@@ -16,8 +16,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 아래는 전부 기본값이고, 명령줄 옵션으로 덮어쓴다. (--help 참고)
 #   python 04.inference.py --remote=192.168.0.201
-#   python 04.inference.py --source local --weights outputs/runs/cube2/weights/best.pt
-DEFAULT_WEIGHTS = os.path.join(BASE_DIR, "outputs", "runs", "cube", "weights", "best.pt")
+#   python 04.inference.py --source local --weights outputs/runs/box/weights/best.pt
+DEFAULT_WEIGHTS = os.path.join(BASE_DIR, "outputs", "runs", "box", "weights", "best.pt")
 
 # "lekiwi" : 라즈베리파이의 lekiwi_host 가 ZMQ 로 뿌리는 영상 (랜선 직결)
 # "local"  : 노트북에 꽂은 USB 웹캠
@@ -37,7 +37,7 @@ MAX_PROBE_INDEX = 10
 DEFAULT_DISPLAY_WIDTH = 640
 DEFAULT_DISPLAY_HEIGHT = 480
 
-DEFAULT_CONF_THRES = 0.25
+DEFAULT_CONF_THRES = 0.6
 DEFAULT_IOU_THRES = 0.45
 DEFAULT_DEVICE = "0"
 

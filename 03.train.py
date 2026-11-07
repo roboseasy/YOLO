@@ -9,7 +9,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 #   python 03.train.py --epochs 200 --name cube2 --device cpu
 DEFAULT_DATA_YAML = os.path.join(BASE_DIR, "dataset", "data.yaml")
 DEFAULT_PROJECT_DIR = os.path.join(BASE_DIR, "outputs", "runs")
-DEFAULT_RUN_NAME = "cube"
+DEFAULT_RUN_NAME = "box"
 
 DEFAULT_PRETRAINED = "yolo26n.pt"
 DEFAULT_EPOCHS = 100
