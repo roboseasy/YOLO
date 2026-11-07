@@ -73,10 +73,11 @@ class LeKiwiStream:
     PUSH/PULL + CONFLATE 라서 host 가 붙어 있는 소비자들에게 프레임을 번갈아
     나눠준다. 한 host 에는 클라이언트를 하나만 붙일 것.
 
-    색은 기본적으로 채널이 뒤집혀서 온다. lerobot 의 OpenCVCameraConfig 기본값이
+    옛 lerobot host 는 채널이 뒤집혀서 온다. lerobot 의 OpenCVCameraConfig 기본값이
     color_mode=RGB 라 host 가 RGB 배열을 그대로 cv2.imencode(BGR 가정)에 넣기
     때문이다. host_color_mode 로 되돌린다 (보라가 분홍으로, 노랑이 파랑으로
-    보이면 이 값이 틀린 것).
+    보이면 이 값이 틀린 것). ROS2 lekiwi_zmq_host 는 관측의 _lekiwi_ros.jpeg 가
+    "standard" 라서 이 값과 상관없이 뒤집지 않는다.
     """
 
     def __init__(self, remote_ip=DEFAULT_REMOTE_IP, cam_name="front",
@@ -118,6 +119,10 @@ class LeKiwiStream:
                 "  다른 클라이언트(teleop, record, 다른 스크립트)가 같은 스트림을\n"
                 "  이미 빨아가고 있지는 않은지도 확인하세요 — 프레임을 나눠 가집니다."
             )
+
+        # ROS2 lekiwi_zmq_host 는 표준 JPEG(BGR 로 올바르게 인코딩)이라고 밝힌다 → 뒤집으면 오히려 틀린다.
+        if (obs.get("_lekiwi_ros") or {}).get("jpeg") == "standard":
+            self.host_color_mode = "bgr"
 
         self.camera_names = sorted(k for k, v in obs.items() if isinstance(v, str))
         if not self.camera_names:

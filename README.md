@@ -90,6 +90,8 @@ python 01.take_video.py --remote=10.42.0.61
   나눠 가져서 뚝뚝 끊깁니다.
 - 색이 이상하면(보라가 분홍, 노랑이 파랑) `--color-mode bgr` 로 실행합니다. lerobot 의
   `OpenCVCameraConfig` 기본값이 RGB 라 host 가 채널을 뒤집어 보내는 것을 되돌리는 값입니다.
+  ROS2 LeKiwi(`lekiwi_zmq_host`)는 표준 JPEG 이라고 스스로 알려 주므로 자동으로 맞춰지고
+  이 옵션은 무시됩니다.
 - host 는 FPS 를 알려주지 않아서, 녹화 전에 2초간 실제 프레임 속도를 재서 그 값으로 저장합니다.
 
 ### 2. 데이터 전처리 — 프레임 분할
