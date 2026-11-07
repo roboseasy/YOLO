@@ -12,6 +12,7 @@ yolo/
 ├── 03.train.py               # YOLO 학습 + 검증
 ├── 04.inference.py           # 학습한 가중치로 실시간 추론
 ├── 05.upload_hf.py           # 학습한 가중치를 Hugging Face Hub 에 업로드
+├── 06.recollect_dataset.py   # 지금 모델로 자동 라벨링해 dataset/train 에 데이터 추가
 ├── dataset/                  # 라벨링된 학습 데이터 (data.yaml)
 ├── outputs/                  # 생성물 저장소 (git 추적 제외)
 │   ├── videos/               # 촬영된 mp4 파일
@@ -192,6 +193,25 @@ results = model.predict("image.jpg", conf=0.25)
 
 **공개된 모델**: [roboseasylabs/red_cube_yolo](https://huggingface.co/roboseasylabs/red_cube_yolo)
 (`yolo26n`, 100 epochs, mAP50-95 **0.9892**)
+
+### 7. 데이터 추가 수집 — 자동 라벨링
+[06.recollect_dataset.py](06.recollect_dataset.py)
+
+지금 모델로 LeKiwi 영상을 추론하면서, 잡힌 박스가 **전부** `--save-conf`(기본 0.90) 이상인
+프레임만 원본 이미지(png) + YOLO 라벨로 `dataset/train/images` · `labels` 에 이어 붙입니다.
+다 모았으면 `03.train.py` 로 다시 학습합니다.
+
+```bash
+python 06.recollect_dataset.py --remote=192.168.0.206          # front / wrist 는 실행 중 선택
+python 06.recollect_dataset.py --save-conf 0.95 --interval 0.5 # 기준 강화, 0.5초마다
+```
+
+- **Space**: 수집 시작/중지 (처음엔 멈춤 상태), **q / ESC**: 종료
+- 가중치를 안 주면 `outputs/runs` 에서 가장 최근 `best.pt` 를 씁니다. 모델 클래스 이름이
+  `dataset/data.yaml` 의 `names` 와 다르면 시작하지 않습니다.
+- `--conf` 이상 `--save-conf` 미만인 박스가 하나라도 있으면 그 프레임은 버립니다. 애매한 박스만 빼고
+  저장하면 그 물체가 배경으로 학습되기 때문입니다.
+- 파일 이름은 `recollect_<카메라>_<시각>_00001.png` 라서 지우고 싶으면 `recollect_*` 만 지우면 됩니다.
 
 ## 요구사항
 
